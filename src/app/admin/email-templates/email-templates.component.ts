@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { AdminManagementService } from '../../shared/services/admin-management.service';
 
 interface EmailTemplate {
@@ -15,7 +16,7 @@ interface EmailTemplate {
 const EMAIL_FOOTER = `<hr style="border: none; border-top: 1px solid #dfe1e2; margin: 24px 0;" />
 <table cellpadding="0" cellspacing="0" style="margin-top: 16px;">
   <tr>
-    <td><img src="assets/gsa-logo-new.png" alt="U.S. General Services Administration" height="12" style="height: 12px; width: auto; display: block;" /></td>
+    <td><img src="assets/gsa-logo-new.png" alt="U.S. General Services Administration" height="54" style="height: 54px; width: auto; display: block;" /></td>
   </tr>
 </table>`;
 
@@ -61,7 +62,7 @@ export class EmailTemplatesComponent implements OnInit {
   sending = false;
   sendResult: { success: boolean; message: string } | null = null;
 
-  constructor(private adminService: AdminManagementService) {}
+  constructor(private adminService: AdminManagementService, private sanitizer: DomSanitizer) {}
 
   ngOnInit(): void {
     this.adminService.listAgencies().subscribe({
@@ -205,6 +206,38 @@ export class EmailTemplatesComponent implements OnInit {
     body = body.replace('{{days_inactive}}', String(this.inactivityDays));
     body = body.replace('{{update_notes}}', this.getUpdateNotesHtml());
     return body + EMAIL_FOOTER;
+  }
+
+  // The preview used to bind getFullBody() straight to [innerHTML], which runs it
+  // through Angular's sanitiser. The sanitiser strips style attributes, so every
+  // inline style the email carries was silently dropped from the preview. With the
+  // footer logo that was very visible: the email sends it at 12px, the preview drew
+  // it at its natural 152px, because once the inline height was gone the global
+  // "img { height: auto }" in styles.scss took over.
+  //
+  // Trying to win that back from CSS does not work. "height: revert" and
+  // "height: unset" both roll the cascade back past the HTML height attribute, so
+  // the image still lands on auto. The attribute cannot be recovered once the
+  // inline style is gone.
+  //
+  // So the preview now renders the same trusted HTML the send path already mails
+  // out verbatim. These templates are written by GSA admins in this screen and
+  // shown back to those same admins, and the identical markup is emailed unsanitised
+  // either way, so this does not widen what a template author can already do.
+  //
+  // The result is cached against the exact string it was built from. [innerHTML]
+  // compares by reference, so returning a fresh SafeHtml on every change-detection
+  // pass would rebuild the preview DOM continuously.
+  private previewCacheKey: string | null = null;
+  private previewCacheValue: SafeHtml | null = null;
+
+  getPreviewBody(): SafeHtml {
+    const html = this.getFullBody();
+    if (html !== this.previewCacheKey) {
+      this.previewCacheKey = html;
+      this.previewCacheValue = this.sanitizer.bypassSecurityTrustHtml(html);
+    }
+    return this.previewCacheValue as SafeHtml;
   }
 
   loadRecipientCount(): void {
