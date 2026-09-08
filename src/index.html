@@ -20,7 +20,13 @@
 
 
   <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <!-- Material Symbols, not the older Material Icons. The markup throughout the app
+       uses the .material-symbols-outlined class, which only the Symbols stylesheet
+       defines; loading Icons instead left that class with no font-family, so every
+       icon rendered its ligature name as literal text ("open_in_new").
+       display=block rather than swap: an icon font that falls back to a system face
+       shows the ligature word until it loads, which is the same defect briefly. -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block" rel="stylesheet">
 </head>
 
 <body>
