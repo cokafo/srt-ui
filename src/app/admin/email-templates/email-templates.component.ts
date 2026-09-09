@@ -59,6 +59,12 @@ export class EmailTemplatesComponent implements OnInit {
   // Send flow
   confirmStep = 0; // 0 = not started, 1 = first warning, 2 = second warning, 3 = sending
   recipientCount = 0;
+  // The actual people, not just how many. A number cannot show a wrong
+  // audience; the list can.
+  recipients: Array<{ id: number; email: string; firstName?: string; lastName?: string;
+                      agency?: string; userRole?: string }> = [];
+  showRecipients = false;
+  recipientsLoading = false;
   sending = false;
   sendResult: { success: boolean; message: string } | null = null;
 
@@ -241,20 +247,34 @@ export class EmailTemplatesComponent implements OnInit {
   }
 
   loadRecipientCount(): void {
-    this.adminService.listUsers({
-      status: this.recipientMode === 'inactive' ? '' : 'active',
-      agency: this.recipientMode === 'agency' ? this.selectedAgency : undefined
+    // Asks the server the same question the send asks, through the same resolver,
+    // so what is shown is what will be mailed. This used to be a separate user
+    // query that disagreed with the send: for the inactive mode it counted every
+    // user while the send went to every active user.
+    this.recipientsLoading = true;
+    this.adminService.previewRecipients({
+      recipientMode: this.recipientMode,
+      agency: this.recipientMode === 'agency' ? this.selectedAgency : undefined,
+      role: this.recipientMode === 'role' ? this.selectedRole : undefined,
+      inactivityDays: this.recipientMode === 'inactive' ? this.inactivityDays : undefined
     }).subscribe({
       next: (data) => {
-        let users = data.users || [];
-        if (this.recipientMode === 'role') {
-          users = users.filter((u: any) => u.userRole === this.selectedRole);
-        }
-        this.recipientCount = users.length;
+        this.recipients = data.recipients || [];
+        this.recipientCount = data.count || 0;
+        this.recipientsLoading = false;
       },
-      error: () => { this.recipientCount = 0; }
+      error: () => {
+        this.recipients = [];
+        this.recipientCount = 0;
+        this.recipientsLoading = false;
+      }
     });
   }
+
+  toggleRecipients(): void {
+    this.showRecipients = !this.showRecipients;
+  }
+
 
   onRecipientChange(): void {
     this.confirmStep = 0;
@@ -293,7 +313,10 @@ export class EmailTemplatesComponent implements OnInit {
       recipientMode: this.recipientMode,
       agency: this.recipientMode === 'agency' ? this.selectedAgency : undefined,
       role: this.recipientMode === 'role' ? this.selectedRole : undefined,
-      inactivityDays: this.recipientMode === 'inactive' ? this.inactivityDays : undefined
+      inactivityDays: this.recipientMode === 'inactive' ? this.inactivityDays : undefined,
+      // The count the administrator actually reviewed. The server refuses the
+      // send if the audience has changed since then.
+      expectedRecipientCount: this.recipientCount
     };
 
     this.adminService.sendBulkEmail(payload).subscribe({
@@ -305,7 +328,18 @@ export class EmailTemplatesComponent implements OnInit {
       error: (err) => {
         this.sending = false;
         this.confirmStep = 0;
-        this.sendResult = { success: false, message: err.error?.error || 'Failed to send email.' };
+        if (err.status === 409) {
+          // The audience changed between review and send. Refresh the list so the
+          // administrator reviews the new one rather than retrying blind.
+          this.sendResult = { success: false, message:
+            `Nothing was sent. The recipient list changed while you were reviewing it, `
+            + `from ${err.error?.expected} to ${err.error?.actual} people. `
+            + `The list below has been refreshed. Please check it and send again.` };
+          this.showRecipients = true;
+          this.loadRecipientCount();
+        } else {
+          this.sendResult = { success: false, message: err.error?.error || 'Failed to send email.' };
+        }
       }
     });
   }
