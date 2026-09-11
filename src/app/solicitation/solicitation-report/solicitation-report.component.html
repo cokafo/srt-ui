@@ -79,6 +79,30 @@
             </select>
           </div>
 
+          <!-- Agency Filter -->
+          <div class="filter-group">
+            <label class="filter-group__legend" for="filter_agency">Agency</label>
+            <input
+              id="filter_agency"
+              type="text"
+              class="filter-input"
+              placeholder="e.g. Defense"
+              [(ngModel)]="agencyFilterModel"
+              (input)="dt.filter(agencyFilterModel || '', 'agency', 'contains')" />
+          </div>
+
+          <!-- Office Filter -->
+          <div class="filter-group">
+            <label class="filter-group__legend" for="filter_office">Office</label>
+            <input
+              id="filter_office"
+              type="text"
+              class="filter-input"
+              placeholder="e.g. Navy"
+              [(ngModel)]="officeFilterModel"
+              (input)="dt.filter(officeFilterModel || '', 'office', 'contains')" />
+          </div>
+
           <!-- Time Range -->
           <div class="filter-group">
             <label class="filter-group__legend" for="ddl_timeRange">Time Range</label>

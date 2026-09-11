@@ -135,7 +135,7 @@
           <p class="preview-meta"><strong>From:</strong> srt-noreply</p>
           <p class="preview-meta"><strong>Subject:</strong> {{ editingSubject }}</p>
           <hr style="margin: 8px 0;" />
-          <div [innerHTML]="getFullBody()"></div>
+          <div [innerHTML]="getPreviewBody()"></div>
         </div>
       </div>
     </div>
@@ -188,7 +188,41 @@
         </select>
       }
 
-      <p class="font-sans-xs margin-top-1 text-base-dark">{{ recipientCount }} recipient(s) will receive this email.</p>
+      <p class="font-sans-xs margin-top-1 text-base-dark">
+        @if (recipientsLoading) {
+          Working out who this reaches...
+        } @else {
+          <strong>{{ recipientCount }}</strong> recipient(s) will receive this email.
+          @if (recipientCount > 0) {
+            <button type="button" class="usa-button usa-button--unstyled margin-left-1"
+                    (click)="toggleRecipients()">
+              {{ showRecipients ? 'Hide' : 'Show' }} the list
+            </button>
+          }
+        }
+      </p>
+
+      @if (showRecipients && recipients.length) {
+        <div class="recipient-list margin-bottom-2" role="region" aria-label="Recipients">
+          <table class="usa-table usa-table--compact width-full">
+            <caption class="font-sans-3xs text-base-dark">
+              Everyone below will receive this email.
+            </caption>
+            <thead>
+              <tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Agency</th></tr>
+            </thead>
+            <tbody>
+              @for (r of recipients; track r.id) {
+                <tr>
+                  <td>{{ r.firstName }} {{ r.lastName }}</td>
+                  <td>{{ r.email }}</td>
+                  <td>{{ r.agency }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
     </fieldset>
 
     <!-- Send Flow -->
@@ -202,7 +236,7 @@
       @if (confirmStep === 1) {
         <div class="usa-alert usa-alert--warning usa-alert--slim margin-bottom-2" role="alert">
           <div class="usa-alert__body">
-            <p class="usa-alert__text">Please review for any inaccuracies. This will send to <strong>{{ recipientCount }}</strong> recipient(s).</p>
+            <p class="usa-alert__text">Review before sending. This will email <strong>{{ recipientCount }}</strong> recipient(s){{ recipientMode === 'agency' ? ' at ' + selectedAgency : '' }}{{ recipientMode === 'role' ? ' with the role ' + selectedRole : '' }}{{ recipientMode === 'all' ? ', which is every active user' : '' }}{{ recipientMode === 'inactive' ? ', dormant for ' + inactivityDays + ' days or more' : '' }}. Expand the list above and check it is who you mean. Email cannot be recalled once sent.</p>
           </div>
         </div>
         <button class="usa-button usa-button--secondary" (click)="cancelSend()">Cancel</button>
@@ -212,7 +246,7 @@
       @if (confirmStep === 2) {
         <div class="usa-alert usa-alert--error usa-alert--slim margin-bottom-2" role="alert">
           <div class="usa-alert__body">
-            <p class="usa-alert__text">Final confirmation: Please review for any inaccuracies. Are you sure you want to send this to <strong>{{ recipientCount }}</strong> recipient(s)?</p>
+            <p class="usa-alert__text">Last chance. Sending now delivers to <strong>{{ recipientCount }}</strong> recipient(s) immediately. There is no undo and no recall. If you have not looked at the list, cancel and look at it.</p>
           </div>
         </div>
         <button class="usa-button usa-button--secondary" (click)="cancelSend()">Cancel</button>

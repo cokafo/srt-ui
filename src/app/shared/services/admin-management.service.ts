@@ -196,7 +196,20 @@ export class AdminManagementService {
     agency?: string;
     role?: string;
     inactivityDays?: number;
+    // Sent back so the server can refuse if the audience changed since review.
+    expectedRecipientCount?: number;
   }): Observable<any> {
     return this.http.post<any>(`${this.baseUrl}/admin/send-bulk-email`, payload);
+  }
+
+  /** Who a send with these options would actually reach. Same resolver as the send. */
+  previewRecipients(payload: {
+    recipientMode: string;
+    agency?: string;
+    role?: string;
+    inactivityDays?: number;
+  }): Observable<{ count: number; recipients: any[] }> {
+    return this.http.post<{ count: number; recipients: any[] }>(
+      `${this.baseUrl}/admin/send-bulk-email/preview`, payload);
   }
 }

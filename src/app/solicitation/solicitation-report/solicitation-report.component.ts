@@ -58,6 +58,11 @@ export class SolicitationReportComponent extends BaseComponent implements OnInit
     };
   noticeTypeFilterModel: string;
   reviewResultFilterModel: string;
+  // Agency and office are filtered separately from the free-text search so a
+  // user can narrow to a department and a component at the same time, which the
+  // single search box could not express.
+  agencyFilterModel = '';
+  officeFilterModel = '';
 
   stacked: Boolean = false;
 

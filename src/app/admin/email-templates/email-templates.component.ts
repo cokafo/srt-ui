@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { AdminManagementService } from '../../shared/services/admin-management.service';
 
 interface EmailTemplate {
@@ -15,7 +16,7 @@ interface EmailTemplate {
 const EMAIL_FOOTER = `<hr style="border: none; border-top: 1px solid #dfe1e2; margin: 24px 0;" />
 <table cellpadding="0" cellspacing="0" style="margin-top: 16px;">
   <tr>
-    <td><img src="assets/gsa-logo-new.png" alt="U.S. General Services Administration" height="12" style="height: 12px; width: auto; display: block;" /></td>
+    <td><img src="assets/gsa-logo-new.png" alt="U.S. General Services Administration" height="54" style="height: 54px; width: auto; display: block;" /></td>
   </tr>
 </table>`;
 
@@ -58,10 +59,16 @@ export class EmailTemplatesComponent implements OnInit {
   // Send flow
   confirmStep = 0; // 0 = not started, 1 = first warning, 2 = second warning, 3 = sending
   recipientCount = 0;
+  // The actual people, not just how many. A number cannot show a wrong
+  // audience; the list can.
+  recipients: Array<{ id: number; email: string; firstName?: string; lastName?: string;
+                      agency?: string; userRole?: string }> = [];
+  showRecipients = false;
+  recipientsLoading = false;
   sending = false;
   sendResult: { success: boolean; message: string } | null = null;
 
-  constructor(private adminService: AdminManagementService) {}
+  constructor(private adminService: AdminManagementService, private sanitizer: DomSanitizer) {}
 
   ngOnInit(): void {
     this.adminService.listAgencies().subscribe({
@@ -207,21 +214,67 @@ export class EmailTemplatesComponent implements OnInit {
     return body + EMAIL_FOOTER;
   }
 
+  // The preview used to bind getFullBody() straight to [innerHTML], which runs it
+  // through Angular's sanitiser. The sanitiser strips style attributes, so every
+  // inline style the email carries was silently dropped from the preview. With the
+  // footer logo that was very visible: the email sends it at 12px, the preview drew
+  // it at its natural 152px, because once the inline height was gone the global
+  // "img { height: auto }" in styles.scss took over.
+  //
+  // Trying to win that back from CSS does not work. "height: revert" and
+  // "height: unset" both roll the cascade back past the HTML height attribute, so
+  // the image still lands on auto. The attribute cannot be recovered once the
+  // inline style is gone.
+  //
+  // So the preview now renders the same trusted HTML the send path already mails
+  // out verbatim. These templates are written by GSA admins in this screen and
+  // shown back to those same admins, and the identical markup is emailed unsanitised
+  // either way, so this does not widen what a template author can already do.
+  //
+  // The result is cached against the exact string it was built from. [innerHTML]
+  // compares by reference, so returning a fresh SafeHtml on every change-detection
+  // pass would rebuild the preview DOM continuously.
+  private previewCacheKey: string | null = null;
+  private previewCacheValue: SafeHtml | null = null;
+
+  getPreviewBody(): SafeHtml {
+    const html = this.getFullBody();
+    if (html !== this.previewCacheKey) {
+      this.previewCacheKey = html;
+      this.previewCacheValue = this.sanitizer.bypassSecurityTrustHtml(html);
+    }
+    return this.previewCacheValue as SafeHtml;
+  }
+
   loadRecipientCount(): void {
-    this.adminService.listUsers({
-      status: this.recipientMode === 'inactive' ? '' : 'active',
-      agency: this.recipientMode === 'agency' ? this.selectedAgency : undefined
+    // Asks the server the same question the send asks, through the same resolver,
+    // so what is shown is what will be mailed. This used to be a separate user
+    // query that disagreed with the send: for the inactive mode it counted every
+    // user while the send went to every active user.
+    this.recipientsLoading = true;
+    this.adminService.previewRecipients({
+      recipientMode: this.recipientMode,
+      agency: this.recipientMode === 'agency' ? this.selectedAgency : undefined,
+      role: this.recipientMode === 'role' ? this.selectedRole : undefined,
+      inactivityDays: this.recipientMode === 'inactive' ? this.inactivityDays : undefined
     }).subscribe({
       next: (data) => {
-        let users = data.users || [];
-        if (this.recipientMode === 'role') {
-          users = users.filter((u: any) => u.userRole === this.selectedRole);
-        }
-        this.recipientCount = users.length;
+        this.recipients = data.recipients || [];
+        this.recipientCount = data.count || 0;
+        this.recipientsLoading = false;
       },
-      error: () => { this.recipientCount = 0; }
+      error: () => {
+        this.recipients = [];
+        this.recipientCount = 0;
+        this.recipientsLoading = false;
+      }
     });
   }
+
+  toggleRecipients(): void {
+    this.showRecipients = !this.showRecipients;
+  }
+
 
   onRecipientChange(): void {
     this.confirmStep = 0;
@@ -260,7 +313,10 @@ export class EmailTemplatesComponent implements OnInit {
       recipientMode: this.recipientMode,
       agency: this.recipientMode === 'agency' ? this.selectedAgency : undefined,
       role: this.recipientMode === 'role' ? this.selectedRole : undefined,
-      inactivityDays: this.recipientMode === 'inactive' ? this.inactivityDays : undefined
+      inactivityDays: this.recipientMode === 'inactive' ? this.inactivityDays : undefined,
+      // The count the administrator actually reviewed. The server refuses the
+      // send if the audience has changed since then.
+      expectedRecipientCount: this.recipientCount
     };
 
     this.adminService.sendBulkEmail(payload).subscribe({
@@ -272,7 +328,18 @@ export class EmailTemplatesComponent implements OnInit {
       error: (err) => {
         this.sending = false;
         this.confirmStep = 0;
-        this.sendResult = { success: false, message: err.error?.error || 'Failed to send email.' };
+        if (err.status === 409) {
+          // The audience changed between review and send. Refresh the list so the
+          // administrator reviews the new one rather than retrying blind.
+          this.sendResult = { success: false, message:
+            `Nothing was sent. The recipient list changed while you were reviewing it, `
+            + `from ${err.error?.expected} to ${err.error?.actual} people. `
+            + `The list below has been refreshed. Please check it and send again.` };
+          this.showRecipients = true;
+          this.loadRecipientCount();
+        } else {
+          this.sendResult = { success: false, message: err.error?.error || 'Failed to send email.' };
+        }
       }
     });
   }
