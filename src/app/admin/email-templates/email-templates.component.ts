@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import DOMPurify from 'dompurify';
 import { AdminManagementService } from '../../shared/services/admin-management.service';
 
 interface EmailTemplate {
@@ -226,10 +227,12 @@ export class EmailTemplatesComponent implements OnInit {
   // the image still lands on auto. The attribute cannot be recovered once the
   // inline style is gone.
   //
-  // So the preview now renders the same trusted HTML the send path already mails
-  // out verbatim. These templates are written by GSA admins in this screen and
-  // shown back to those same admins, and the identical markup is emailed unsanitised
-  // either way, so this does not widen what a template author can already do.
+  // So the preview runs the body through DOMPurify and trusts THAT. DOMPurify keeps
+  // inline style, which restores the sizing, and strips scripts, event handlers
+  // and javascript: URLs, which Angular's sanitiser would also have removed. The
+  // preview is therefore at least as safe as it was before, and no longer a raw
+  // DOM-to-HTML sink (the js/xss-through-dom finding CodeQL raised on the first
+  // version of this). The send path is unchanged and still mails the raw body.
   //
   // The result is cached against the exact string it was built from. [innerHTML]
   // compares by reference, so returning a fresh SafeHtml on every change-detection
@@ -241,7 +244,18 @@ export class EmailTemplatesComponent implements OnInit {
     const html = this.getFullBody();
     if (html !== this.previewCacheKey) {
       this.previewCacheKey = html;
-      this.previewCacheValue = this.sanitizer.bypassSecurityTrustHtml(html);
+      // Angular's own sanitiser strips style attributes, which is what made the
+      // preview misrepresent the email (the footer logo drew at 152px instead of
+      // 12px). Trusting the raw editor text instead is a DOM-to-HTML sink with no
+      // sanitiser in between, which CodeQL flags as js/xss-through-dom, and it is
+      // right to: an administrator pasting markup from elsewhere could carry a
+      // script or an onerror handler into the preview.
+      //
+      // DOMPurify keeps inline style, so the preview still shows what the
+      // recipient receives, and removes scripts, event handlers and javascript:
+      // URLs. The sanitised string is what gets trusted, never the raw text.
+      const clean = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+      this.previewCacheValue = this.sanitizer.bypassSecurityTrustHtml(clean);
     }
     return this.previewCacheValue as SafeHtml;
   }
